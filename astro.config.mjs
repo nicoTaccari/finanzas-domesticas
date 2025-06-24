@@ -5,8 +5,7 @@ import vercel from '@astrojs/vercel/serverless';
 
 export default defineConfig({
   integrations: [react(), tailwind()],
-  output: 'server', // Cambiar de 'static' a 'server'
-  adapter: vercel(),
+  output: 'static',
   vite: {
     define: {
       'process.env.PUBLIC_SUPABASE_URL': JSON.stringify(process.env.PUBLIC_SUPABASE_URL),
