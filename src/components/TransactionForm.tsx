@@ -1,6 +1,9 @@
 import React, { useState } from "react";
 import styled from "@emotion/styled";
-import type { Transaction } from "./FinanceApp";
+import { Calculator } from "lucide-react";
+import { useCurrencies } from "../hooks/useCurrencies";
+import CurrencySelector from "./CurrencySelector";
+import type { Transaction } from "../lib/supabase";
 
 const Form = styled.form`
   display: flex;
@@ -53,6 +56,33 @@ const Select = styled.select`
   }
 `;
 
+const AmountGroup = styled.div`
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+`;
+
+const ConversionInfo = styled.div`
+  background: #f0f4ff;
+  border: 2px solid #e5edff;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #4c51bf;
+`;
+
+const RateSelector = styled.div`
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+`;
+
 const SubmitButton = styled.button`
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
@@ -76,18 +106,35 @@ const SubmitButton = styled.button`
 `;
 
 interface TransactionFormProps {
-  onAddTransaction: (transaction: Omit<Transaction, "id">) => void;
+  onAddTransaction: (
+    transaction: Omit<
+      Transaction,
+      "id" | "user_id" | "created_at" | "updated_at"
+    >
+  ) => Promise<void>;
+  householdId: string;
 }
 
 const TransactionForm: React.FC<TransactionFormProps> = ({
   onAddTransaction,
+  householdId,
 }) => {
+  const {
+    currencies,
+    getLatestRate,
+    convertAmount,
+    formatAmount,
+    getPrimaryCurrency,
+  } = useCurrencies(householdId);
+
   const [formData, setFormData] = useState({
     type: "income" as Transaction["type"],
     amount: "",
+    currency_id: "ARS",
     description: "",
     category: "",
     date: new Date().toISOString().split("T")[0],
+    exchange_rate_type: "manual",
   });
 
   const categoryOptions = {
@@ -121,7 +168,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({
     ],
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.amount || !formData.description || !formData.category) {
@@ -129,27 +176,72 @@ const TransactionForm: React.FC<TransactionFormProps> = ({
       return;
     }
 
-    onAddTransaction({
+    const amount = parseFloat(formData.amount);
+    const primaryCurrency = getPrimaryCurrency();
+
+    // Obtener tasa de cambio y convertir a moneda primaria si es necesario
+    const exchangeRate = getLatestRate(
+      formData.currency_id,
+      primaryCurrency,
+      formData.exchange_rate_type
+    );
+    const amountUsd = convertAmount(
+      amount,
+      formData.currency_id,
+      "USD",
+      formData.exchange_rate_type
+    );
+
+    await onAddTransaction({
       type: formData.type,
-      amount: parseFloat(formData.amount),
+      amount: amount,
+      currency_id: formData.currency_id,
+      amount_usd: amountUsd,
+      exchange_rate: exchangeRate,
+      exchange_rate_type: formData.exchange_rate_type,
       description: formData.description,
       category: formData.category,
       date: formData.date,
+      household_id: householdId,
     });
 
     // Reset form
     setFormData({
       type: "income",
       amount: "",
+      currency_id: "ARS",
       description: "",
       category: "",
       date: new Date().toISOString().split("T")[0],
+      exchange_rate_type: "manual",
     });
   };
 
   const handleTypeChange = (type: Transaction["type"]) => {
     setFormData({ ...formData, type, category: "" });
   };
+
+  // Calcular conversión en tiempo real
+  const primaryCurrency = getPrimaryCurrency();
+  const currentAmount = parseFloat(formData.amount) || 0;
+  const convertedAmount =
+    formData.currency_id !== primaryCurrency && currentAmount > 0
+      ? convertAmount(
+          currentAmount,
+          formData.currency_id,
+          primaryCurrency,
+          formData.exchange_rate_type
+        )
+      : null;
+
+  const currentRate =
+    formData.currency_id !== primaryCurrency
+      ? getLatestRate(
+          formData.currency_id,
+          primaryCurrency,
+          formData.exchange_rate_type
+        )
+      : null;
 
   return (
     <Form onSubmit={handleSubmit}>
@@ -169,17 +261,58 @@ const TransactionForm: React.FC<TransactionFormProps> = ({
       </FormGroup>
 
       <FormGroup>
-        <Label>Cantidad</Label>
-        <Input
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="0.00"
-          value={formData.amount}
-          onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-          required
-        />
+        <Label>Cantidad y Moneda</Label>
+        <AmountGroup>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+            value={formData.amount}
+            onChange={(e) =>
+              setFormData({ ...formData, amount: e.target.value })
+            }
+            required
+          />
+
+          <CurrencySelector
+            currencies={currencies}
+            value={formData.currency_id}
+            onChange={(value) =>
+              setFormData({ ...formData, currency_id: value })
+            }
+          />
+        </AmountGroup>
+
+        {convertedAmount && currentRate && (
+          <ConversionInfo>
+            <Calculator size={16} />≈{" "}
+            {formatAmount(convertedAmount, primaryCurrency)}
+            (Tasa: {currentRate.toFixed(2)} {formData.exchange_rate_type})
+          </ConversionInfo>
+        )}
       </FormGroup>
+
+      {formData.currency_id !== primaryCurrency && (
+        <FormGroup>
+          <Label>Tipo de Cambio</Label>
+          <RateSelector>
+            <Select
+              value={formData.exchange_rate_type}
+              onChange={(e) =>
+                setFormData({ ...formData, exchange_rate_type: e.target.value })
+              }
+            >
+              <option value="manual">Manual</option>
+              <option value="oficial">Oficial</option>
+              <option value="blue">Blue</option>
+              <option value="mep">MEP</option>
+              <option value="ccl">CCL</option>
+              <option value="cripto">Cripto</option>
+            </Select>
+          </RateSelector>
+        </FormGroup>
+      )}
 
       <FormGroup>
         <Label>Descripción</Label>

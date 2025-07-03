@@ -1,7 +1,8 @@
 import React from "react";
 import styled from "@emotion/styled";
 import { TrendingUp, TrendingDown, PiggyBank, Target } from "lucide-react";
-import type { Transaction } from "./FinanceApp";
+import { useCurrencies } from "../hooks/useCurrencies";
+import type { Transaction } from "../lib/supabase";
 
 const CardsContainer = styled.div`
   display: grid;
@@ -75,15 +76,23 @@ const CardIcon = styled.div`
 `;
 
 const Amount = styled.div`
-  font-size: 2.5rem;
+  font-size: 2.2rem;
   font-weight: 800;
   margin-bottom: 8px;
   position: relative;
   z-index: 1;
 
   @media (max-width: 768px) {
-    font-size: 2rem;
+    font-size: 1.8rem;
   }
+`;
+
+const SecondaryAmount = styled.div`
+  font-size: 1rem;
+  opacity: 0.8;
+  margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
 `;
 
 const Label = styled.div`
@@ -98,43 +107,80 @@ const Label = styled.div`
 
 interface BalanceCardsProps {
   transactions: Transaction[];
+  householdId: string;
 }
 
-const BalanceCards: React.FC<BalanceCardsProps> = ({ transactions }) => {
+const BalanceCards: React.FC<BalanceCardsProps> = ({
+  transactions,
+  householdId,
+}) => {
+  const { formatAmount, getPrimaryCurrency, convertAmount } =
+    useCurrencies(householdId);
+
+  const primaryCurrency = getPrimaryCurrency();
+
+  // Calcular totales por tipo en moneda primaria
   const totals = transactions.reduce(
     (acc, transaction) => {
-      acc[transaction.type] += transaction.amount;
+      // Convertir a moneda primaria si es necesario
+      const amountInPrimary =
+        transaction.currency_id === primaryCurrency
+          ? transaction.amount
+          : convertAmount(
+              transaction.amount,
+              transaction.currency_id ?? primaryCurrency,
+              primaryCurrency
+            );
+
+      acc[transaction.type] += amountInPrimary;
       return acc;
     },
     { income: 0, expense: 0, investment: 0, saving: 0 }
   );
 
-  const formatAmount = (amount: number) =>
-    `$${amount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
+  // Calcular totales en USD para referencia
+  const totalsUSD = transactions.reduce(
+    (acc, transaction) => {
+      const amountUSD =
+        transaction.amount_usd ||
+        convertAmount(
+          transaction.amount,
+          transaction.currency_id ?? primaryCurrency,
+          "USD"
+        );
+      acc[transaction.type] += amountUSD;
+      return acc;
+    },
+    { income: 0, expense: 0, investment: 0, saving: 0 }
+  );
 
   const cardData = [
     {
       variant: "income" as const,
       icon: <TrendingUp size={32} />,
       amount: totals.income,
+      amountUSD: totalsUSD.income,
       label: "Ingresos",
     },
     {
       variant: "expense" as const,
       icon: <TrendingDown size={32} />,
       amount: totals.expense,
+      amountUSD: totalsUSD.expense,
       label: "Gastos",
     },
     {
       variant: "investment" as const,
       icon: <PiggyBank size={32} />,
       amount: totals.investment,
+      amountUSD: totalsUSD.investment,
       label: "Inversiones",
     },
     {
       variant: "saving" as const,
       icon: <Target size={32} />,
       amount: totals.saving,
+      amountUSD: totalsUSD.saving,
       label: "Ahorros",
     },
   ];
@@ -144,7 +190,12 @@ const BalanceCards: React.FC<BalanceCardsProps> = ({ transactions }) => {
       {cardData.map((card) => (
         <BalanceCard key={card.variant} variant={card.variant}>
           <CardIcon>{card.icon}</CardIcon>
-          <Amount>{formatAmount(card.amount)}</Amount>
+          <Amount>{formatAmount(card.amount, primaryCurrency)}</Amount>
+          {primaryCurrency !== "USD" && (
+            <SecondaryAmount>
+              ≈ {formatAmount(card.amountUSD, "USD")}
+            </SecondaryAmount>
+          )}
           <Label>{card.label}</Label>
         </BalanceCard>
       ))}

@@ -5,12 +5,17 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Tipos de datos actualizados
 export interface Transaction {
   id?: number;
   user_id?: string;
   household_id: string;
   type: "income" | "expense" | "investment" | "saving";
   amount: number;
+  currency_id?: string;
+  amount_usd?: number;
+  exchange_rate?: number;
+  exchange_rate_type?: string;
   description: string;
   category: string;
   date: string;

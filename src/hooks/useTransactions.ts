@@ -92,22 +92,75 @@ export const useTransactions = (householdId: string | null) => {
 
   const deleteTransaction = async (id: number) => {
     try {
-      console.log("Deleting transaction:", id);
+      console.log("Attempting to delete transaction with ID:", id);
 
-      const { error } = await supabase
-        .from("transactions")
-        .delete()
-        .eq("id", id);
-
-      if (error) {
-        console.error("Error deleting transaction:", error);
-        throw error;
+      // Verificar que el ID es válido
+      if (!id || isNaN(id)) {
+        throw new Error("ID de transacción inválido");
       }
 
-      console.log("Deleted transaction:", id);
+      // Primero verificar que la transacción existe y pertenece al usuario
+      const { data: existingTransaction, error: checkError } = await supabase
+        .from("transactions")
+        .select("id, user_id, household_id")
+        .eq("id", id)
+        .single();
 
-      // Actualizar la lista localmente
-      setTransactions((prev) => prev.filter((t) => t.id !== id));
+      if (checkError) {
+        console.error("Error checking transaction:", checkError);
+        throw new Error("No se pudo verificar la transacción");
+      }
+
+      if (!existingTransaction) {
+        throw new Error("Transacción no encontrada");
+      }
+
+      console.log("Transaction to delete:", existingTransaction);
+
+      // Eliminar la transacción
+      const { error: deleteError, data: deletedData } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("id", id)
+        .select(); // Agregar select para ver qué se eliminó
+
+      if (deleteError) {
+        console.error("Error deleting transaction:", deleteError);
+        throw deleteError;
+      }
+
+      console.log("Deleted transaction data:", deletedData);
+
+      // Verificar que realmente se eliminó
+      if (!deletedData || deletedData.length === 0) {
+        console.warn("No rows were deleted, checking policies...");
+
+        // Intentar con match más específico incluyendo user_id
+        const { data: currentUser } = await supabase.auth.getUser();
+        if (currentUser.user) {
+          const { error: deleteError2 } = await supabase
+            .from("transactions")
+            .delete()
+            .eq("id", id)
+            .eq("user_id", currentUser.user.id);
+
+          if (deleteError2) {
+            console.error("Error with user-specific delete:", deleteError2);
+            throw new Error(
+              "No tienes permisos para eliminar esta transacción"
+            );
+          }
+        }
+      }
+
+      console.log("Successfully deleted transaction:", id);
+
+      // Actualizar la lista localmente removiendo la transacción
+      setTransactions((prev) => {
+        const updated = prev.filter((t) => t.id !== id);
+        console.log("Updated transactions after delete:", updated.length);
+        return updated;
+      });
 
       return { success: true };
     } catch (err) {
@@ -120,6 +173,12 @@ export const useTransactions = (householdId: string | null) => {
     }
   };
 
+  // Función para refrescar transacciones después de operaciones
+  const refreshTransactions = async () => {
+    console.log("Refreshing transactions...");
+    await fetchTransactions();
+  };
+
   return {
     transactions,
     loading,
@@ -127,5 +186,6 @@ export const useTransactions = (householdId: string | null) => {
     addTransaction,
     deleteTransaction,
     refetch: fetchTransactions,
+    refresh: refreshTransactions,
   };
 };

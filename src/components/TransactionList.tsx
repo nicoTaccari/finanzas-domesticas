@@ -1,7 +1,7 @@
 import React from "react";
 import styled from "@emotion/styled";
 import { Trash2, Calendar } from "lucide-react";
-import type { Transaction } from "./FinanceApp";
+import type { Transaction } from "../lib/supabase";
 
 const ListContainer = styled.div`
   max-height: 400px;
@@ -77,18 +77,23 @@ const TransactionAmount = styled.div<{ type: Transaction["type"] }>`
   }}
 `;
 
-const DeleteButton = styled.button`
+const DeleteButton = styled.button<{ deleting?: boolean }>`
   background: none;
   border: none;
-  color: #cbd5e0;
-  cursor: pointer;
+  color: ${(props) => (props.deleting ? "#f56565" : "#cbd5e0")};
+  cursor: ${(props) => (props.deleting ? "not-allowed" : "pointer")};
   padding: 8px;
   border-radius: 8px;
   transition: all 0.3s ease;
+  opacity: ${(props) => (props.deleting ? 0.6 : 1)};
 
-  &:hover {
+  &:hover:not(:disabled) {
     color: #f56565;
     background: #fed7d7;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
   }
 `;
 
@@ -99,21 +104,39 @@ const EmptyState = styled.div`
   font-size: 1rem;
 `;
 
+const DebugInfo = styled.div`
+  font-size: 0.7rem;
+  color: #a0aec0;
+  margin-left: 8px;
+`;
+
 interface TransactionListProps {
   transactions: Transaction[];
-  onDeleteTransaction: (id: number) => void;
+  onDeleteTransaction: (id: number) => Promise<void>;
+  loading?: boolean;
+  showDebug?: boolean; // Para debugging
 }
 
 const TransactionList: React.FC<TransactionListProps> = ({
   transactions,
   onDeleteTransaction,
+  loading = false,
+  showDebug = false,
 }) => {
+  const [deletingIds, setDeletingIds] = React.useState<Set<number>>(new Set());
+
   if (transactions.length === 0) {
     return (
       <EmptyState>
-        No hay transacciones registradas aún.
-        <br />
-        ¡Comienza agregando tu primera transacción!
+        {loading ? (
+          "Cargando transacciones..."
+        ) : (
+          <>
+            No hay transacciones registradas aún.
+            <br />
+            ¡Comienza agregando tu primera transacción!
+          </>
+        )}
       </EmptyState>
     );
   }
@@ -125,20 +148,73 @@ const TransactionList: React.FC<TransactionListProps> = ({
     saving: "Ahorro",
   };
 
-  const formatAmount = (amount: number, type: Transaction["type"]) => {
+  const formatAmount = (
+    amount: number,
+    type: Transaction["type"],
+    currency?: string
+  ) => {
     const sign = type === "expense" ? "-" : "+";
-    return `${sign}$${amount.toLocaleString("es-AR", {
+    const currencySymbol = currency === "USD" ? "US$" : "$";
+    return `${sign}${currencySymbol}${amount.toLocaleString("es-AR", {
       minimumFractionDigits: 2,
     })}`;
   };
 
+  const handleDelete = async (id: number) => {
+    if (!id) {
+      console.error("No ID provided for deletion");
+      return;
+    }
+
+    console.log("Delete button clicked for ID:", id);
+
+    if (deletingIds.has(id)) {
+      console.log("Already deleting this transaction");
+      return;
+    }
+
+    if (!confirm("¿Estás seguro de que quieres eliminar esta transacción?")) {
+      return;
+    }
+
+    try {
+      setDeletingIds((prev) => new Set(prev).add(id));
+      console.log("Starting deletion process for ID:", id);
+
+      await onDeleteTransaction(id);
+
+      console.log("Deletion completed for ID:", id);
+    } catch (error) {
+      console.error("Error in handleDelete:", error);
+      alert("Error al eliminar la transacción");
+    } finally {
+      setDeletingIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+    }
+  };
+
   return (
     <ListContainer>
+      {showDebug && (
+        <DebugInfo>
+          Total transacciones: {transactions.length} | Loading:{" "}
+          {loading ? "Yes" : "No"}
+        </DebugInfo>
+      )}
+
       {transactions.map((transaction) => (
         <TransactionItem key={transaction.id}>
           <TransactionInfo>
             <TransactionDescription>
               {transaction.description}
+              {showDebug && (
+                <DebugInfo>
+                  ID: {transaction.id} | User: {transaction.user_id}
+                </DebugInfo>
+              )}
             </TransactionDescription>
             <TransactionMeta>
               <TransactionCategory>
@@ -150,14 +226,23 @@ const TransactionList: React.FC<TransactionListProps> = ({
                 <Calendar size={12} />
                 {new Date(transaction.date).toLocaleDateString("es-AR")}
               </span>
+              {transaction.currency_id && transaction.currency_id !== "ARS" && (
+                <span>{transaction.currency_id}</span>
+              )}
             </TransactionMeta>
           </TransactionInfo>
           <TransactionAmount type={transaction.type}>
-            {formatAmount(transaction.amount, transaction.type)}
+            {formatAmount(
+              transaction.amount,
+              transaction.type,
+              transaction.currency_id
+            )}
           </TransactionAmount>
           <DeleteButton
-            onClick={() => onDeleteTransaction(transaction.id)}
+            onClick={() => handleDelete(transaction.id!)}
             title="Eliminar transacción"
+            deleting={deletingIds.has(transaction.id!)}
+            disabled={deletingIds.has(transaction.id!) || !transaction.id}
           >
             <Trash2 size={16} />
           </DeleteButton>

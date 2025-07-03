@@ -2,17 +2,11 @@ import React, { useState, useEffect } from "react";
 import styled from "@emotion/styled";
 import {
   PlusCircle,
-  TrendingUp,
-  TrendingDown,
-  PiggyBank,
-  Target,
   Download,
-  Upload,
   Wallet,
-  Users,
   Home,
   LogOut,
-  Settings,
+  DollarSign,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useHousehold } from "../hooks/useHousehold";
@@ -24,6 +18,7 @@ import ExportImport from "./ExportImport";
 import AuthForm from "./AuthForm";
 import HouseholdSelector from "./HouseholdSelector";
 import LoadingSpinner from "./LoadingSpinner";
+import ExchangeRateManager from "./ExchangeRateManager";
 
 const Container = styled.div`
   max-width: 1200px;
@@ -122,6 +117,33 @@ const UserInfo = styled.div`
   margin-top: 8px;
 `;
 
+const TabsContainer = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+  position: relative;
+  z-index: 1;
+`;
+
+const Tab = styled.button<{ active: boolean }>`
+  background: ${(props) =>
+    props.active ? "rgba(255, 255, 255, 0.2)" : "rgba(255, 255, 255, 0.1)"};
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+`;
+
 const Dashboard = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -135,6 +157,14 @@ const Dashboard = styled.div`
   @media (max-width: 768px) {
     padding: 24px;
     gap: 24px;
+  }
+`;
+
+const FullWidthSection = styled.div`
+  margin: 0 32px 32px 32px;
+
+  @media (max-width: 768px) {
+    margin: 0 24px 24px 24px;
   }
 `;
 
@@ -180,6 +210,8 @@ const SuccessMessage = styled.div`
   text-align: center;
 `;
 
+type TabType = "transactions" | "currencies";
+
 const FinanceApp: React.FC = () => {
   const { user, loading: authLoading, signOut } = useAuth();
   const {
@@ -202,6 +234,7 @@ const FinanceApp: React.FC = () => {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>("transactions");
 
   // Mostrar notificaciones temporales
   useEffect(() => {
@@ -275,11 +308,27 @@ const FinanceApp: React.FC = () => {
       return;
     }
 
-    const headers = ["Fecha", "Tipo", "Descripción", "Categoría", "Cantidad"];
+    const headers = [
+      "Fecha",
+      "Tipo",
+      "Descripción",
+      "Categoría",
+      "Cantidad",
+      "Moneda",
+      "Tasa Cambio",
+    ];
     const csvContent = [
       headers.join(","),
       ...transactions.map((t) =>
-        [t.date, t.type, `"${t.description}"`, t.category, t.amount].join(",")
+        [
+          t.date,
+          t.type,
+          `"${t.description}"`,
+          t.category,
+          t.amount,
+          t.currency_id || "ARS",
+          t.exchange_rate || "",
+        ].join(",")
       ),
     ].join("\n");
 
@@ -298,8 +347,6 @@ const FinanceApp: React.FC = () => {
   };
 
   const importData = (csvContent: string) => {
-    // Por ahora mantenemos la funcionalidad local
-    // En el futuro podrías implementar importación masiva a Supabase
     setNotification({
       type: "error",
       message: "Importación temporal deshabilitada en la versión colaborativa",
@@ -356,6 +403,25 @@ const FinanceApp: React.FC = () => {
               onSelectHousehold={setCurrentHousehold}
             />
           )}
+
+          {currentHousehold && (
+            <TabsContainer>
+              <Tab
+                active={activeTab === "transactions"}
+                onClick={() => setActiveTab("transactions")}
+              >
+                <Wallet size={16} />
+                Transacciones
+              </Tab>
+              <Tab
+                active={activeTab === "currencies"}
+                onClick={() => setActiveTab("currencies")}
+              >
+                <DollarSign size={16} />
+                Monedas y Cambios
+              </Tab>
+            </TabsContainer>
+          )}
         </Header>
 
         {/* Notificaciones */}
@@ -400,50 +466,68 @@ const FinanceApp: React.FC = () => {
           </div>
         ) : (
           <>
-            <BalanceCards transactions={transactions} />
+            {/* Balance Cards - Siempre visible */}
+            <BalanceCards
+              transactions={transactions}
+              householdId={currentHousehold.id}
+            />
 
-            <Dashboard>
-              <Card>
-                <CardTitle>
-                  <PlusCircle size={24} />
-                  Nueva Transacción
-                </CardTitle>
-                <TransactionForm onAddTransaction={handleAddTransaction} />
-              </Card>
+            {/* Contenido según tab activa */}
+            {activeTab === "transactions" && (
+              <>
+                <Dashboard>
+                  <Card>
+                    <CardTitle>
+                      <PlusCircle size={24} />
+                      Nueva Transacción
+                    </CardTitle>
+                    <TransactionForm
+                      onAddTransaction={handleAddTransaction}
+                      householdId={currentHousehold.id}
+                    />
+                  </Card>
 
-              <Card>
-                <CardTitle>
-                  <Wallet size={24} />
-                  Transacciones Recientes
-                  {transactionsLoading && (
-                    <div
-                      style={{
-                        marginLeft: "auto",
-                        fontSize: "14px",
-                        color: "#718096",
-                      }}
-                    >
-                      Sincronizando...
-                    </div>
-                  )}
-                </CardTitle>
-                <TransactionList
-                  transactions={transactions.slice(0, 10)}
-                  onDeleteTransaction={handleDeleteTransaction}
-                  loading={transactionsLoading}
-                />
-              </Card>
-            </Dashboard>
+                  <Card>
+                    <CardTitle>
+                      <Wallet size={24} />
+                      Transacciones Recientes
+                      {transactionsLoading && (
+                        <div
+                          style={{
+                            marginLeft: "auto",
+                            fontSize: "14px",
+                            color: "#718096",
+                          }}
+                        >
+                          Sincronizando...
+                        </div>
+                      )}
+                    </CardTitle>
+                    <TransactionList
+                      transactions={transactions.slice(0, 10)}
+                      onDeleteTransaction={handleDeleteTransaction}
+                      loading={transactionsLoading}
+                    />
+                  </Card>
+                </Dashboard>
 
-            <div style={{ margin: "0 32px 32px 32px" }}>
-              <Card>
-                <CardTitle>
-                  <Download size={24} />
-                  Exportar Datos
-                </CardTitle>
-                <ExportImport onExport={exportData} onImport={importData} />
-              </Card>
-            </div>
+                <FullWidthSection>
+                  <Card>
+                    <CardTitle>
+                      <Download size={24} />
+                      Exportar Datos
+                    </CardTitle>
+                    <ExportImport onExport={exportData} onImport={importData} />
+                  </Card>
+                </FullWidthSection>
+              </>
+            )}
+
+            {activeTab === "currencies" && (
+              <FullWidthSection>
+                <ExchangeRateManager householdId={currentHousehold.id} />
+              </FullWidthSection>
+            )}
           </>
         )}
       </AppCard>
